@@ -1,9 +1,79 @@
 
 
+import 'dart:convert';
+
 import 'package:flutter/cupertino.dart';
+import 'package:network_info_plus/network_info_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:developer' as developer;
+import 'dart:io';
+
+class IpAddress {
+  final String ip;
+  final String name;
+
+  IpAddress(this.ip, this.name);
+}
+
+Future<String> checkLiveBox(String ip) async {
+
+  var res = await http.get(Uri.parse("http://$ip:8080/remoteControl/cmd?operation=10"));
+  if (res.statusCode == 200) {
+    var json = jsonDecode(res.body);
+    return json['result']["data"]['friendlyName'];
+  }   
+
+  return "false";
+}
+
+Future<List<IpAddress>> scanNetwork() async {
+  print('Scanning network');
+  List<IpAddress> ListIp = [];
+  await (NetworkInfo().getWifiIP()).then(
+    (ip) async {
+      print("IP FOUND: $ip");
+      final String subnet = ip!.substring(0, ip.lastIndexOf('.'));
+      const port = 8080;
+      for (var i = 0; i < 256; i++) {
+        String ip = '$subnet.$i';
+        await Socket.connect(ip, port, timeout: Duration(milliseconds: 50))
+          .then((socket) async {
+            await InternetAddress(socket.address.address)
+              .reverse()
+              .then((value) {
+                print("FOUND DEVICE");
+                //ListIp.add({
+                //  'ip': socket.address.address,
+                //  'name': value.host ?? socket.address.address
+                //});
+                checkLiveBox(ip).then((value) {
+                  if (value != "false") {
+                    ListIp.add(IpAddress(socket.address.address, value));
+                  }
+                });
+                print("IP : ${socket.address.address}");
+                socket.destroy();
+                
+              }).catchError((error) {
+                print(socket.address.address);
+                // http://IP:8080/remoteControl/cmd?operation=10
+                checkLiveBox(ip).then((value) {
+                  if (value != "false") {
+                    ListIp.add(IpAddress(socket.address.address, value));
+                  }
+                  socket.destroy();
+                });
+
+              });
+          }).catchError((error) => null);
+      }
+    },
+  );
+  print('Done , found ${ListIp.length} devices, returning list');
+  return ListIp;
+}
+
 void main() {
   runApp(const MyApp());
 }
@@ -59,11 +129,31 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  final String _url = "http://192.168.1.10:8080/remoteControl/cmd?operation=01&mode=0&key=";
+  String UsedIp = "";
+  String _url = "/remoteControl/cmd?operation=01&mode=0&key=";
   void press(code){
-    http.get(Uri.parse(_url+code));
+    print("http://"+UsedIp+":8080"+_url+code);
+    http.get(Uri.parse("http://"+UsedIp+":8080"+_url+code));
     developer.log(_url+code);
   }
+
+
+  List<IpAddress> ListIp = [];
+
+  @override
+  void initState() {
+    super.initState();
+    //scan();
+    scanNetwork().then((value) {
+      print("VALUE, ${value}");
+      print("VALUE, ${value.length}, ${value[0].ip}");
+      setState(() {
+        ListIp = value;
+        UsedIp = value.length > 0 ? value[0].ip : "";
+      });
+    });
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -89,19 +179,63 @@ class _MyHomePageState extends State<MyHomePage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
-            FilledButton(onPressed: ()=>{press("158")}, child: const Text("Back")),
-            ElevatedButton(onPressed: () =>{press("352")}, child: const Text("Ok")),
-            Row(
-              children: [
-                FilledButton(onPressed: ()=>{press("105")}, child: const Text("Left")),
-                FilledButton(onPressed: ()=>{press("103")}, child: const Text("Up")),
-                FilledButton(onPressed: ()=>{press("108")}, child: const Text("Down")),
-                FilledButton(onPressed: ()=>{press("106")}, child: const Text("Right")),
-              ],
+            ElevatedButton(onPressed: () =>{press("116")}, child: const Text("Power")),
+            // select ip from the list
+
+            DropdownButton(
+              value: UsedIp,
+              onChanged: (value) {
+                setState(() {
+                  UsedIp = value as String ;
+                });
+              },
+              items: ListIp.map((value) {
+                return DropdownMenuItem(
+                  value: value.ip,
+                  child: Text(value.name),
+                );
+              }).toList(),
+              
             ),
+
             Column(
               children: [
+
+
+                FilledButton(onPressed: ()=>{press("103")}, child: const Text("Up")),
                 Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    FilledButton(onPressed: ()=>{press("105")}, child: const Text("Left")),
+                    ElevatedButton(onPressed: () =>{press("352")}, child: const Text("Ok")),
+                    FilledButton(onPressed: ()=>{press("106")}, child: const Text("Right")),
+                  ],
+                ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    FilledButton(onPressed: ()=>{press("104")}, child: const Text("Back")),
+                    FilledButton(onPressed: ()=>{press("107")}, child: const Text("Home")),
+                    FilledButton(onPressed: ()=>{press("102")}, child: const Text("Menu")),
+                  ],
+                )
+
+              ],
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Column(
+                  children: [
+                    ElevatedButton(onPressed: () =>{press("114")}, child: const Text("+")),
+                    ElevatedButton(onPressed: () =>{press("115")}, child: const Text("-")),
+                    ElevatedButton(onPressed: () =>{press("113")}, child: const Text("Mute")),
+                  ],
+                ),
+                Column(
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     FilledButton(onPressed: ()=>{press("513")}, child: const Text("1")),
                     FilledButton(onPressed: ()=>{press("514")}, child: const Text("2")),
@@ -109,24 +243,41 @@ class _MyHomePageState extends State<MyHomePage> {
                   ],
                 ),
                 Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     FilledButton(onPressed: ()=>{press("516")}, child: const Text("4")),
                     FilledButton(onPressed: ()=>{press("517")}, child: const Text("5")),
                     FilledButton(onPressed: ()=>{press("518")}, child: const Text("6")),
                   ],),
                 Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     FilledButton(onPressed: ()=>{press("519")}, child: const Text("7")),
                     FilledButton(onPressed: ()=>{press("520")}, child: const Text("8")),
                     FilledButton(onPressed: ()=>{press("521")}, child: const Text("9")),
                   ],),
                 Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     FilledButton(onPressed: ()=>{press("512")}, child: const Text("0")),
                   ],),
 
               ],
             ),
+                
+                Column(
+                  children: [
+                    //next / previous
+                        ElevatedButton(onPressed: ()=>{press("403")}, child: const Text("Next")),
+                        ElevatedButton(onPressed: ()=>{press("402")}, child: const Text("Previous")),
+
+                    
+                  ],
+                )
+              ],
+            ),
+            
+            
           ],
         ),
       ),
